@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OrganizaACS - Planejador Semanal do Agente de Saúde (SMS Rio)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        rio: {
+                            50: '#f0f7ff',
+                            100: '#e0effe',
+                            200: '#bae0fd',
+                            600: '#0072ce',
+                            700: '#005082',
+                            800: '#003a61',
+                            900: '#002b49',
+                            gold: '#f1b100'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <!-- html2pdf.js for Direct PDF Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+
+        /* Print and PDF styling rules */
+        @media print {
+            .no-print {
+                display: none !important;
+            }
+            body {
+                background-color: #ffffff !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+            .planner-container {
+                box-shadow: none !important;
+                border: none !important;
+                max-width: 100% !important;
+                width: 100% !important;
+                padding: 0 !important;
+            }
+            textarea {
+                border: none !important;
+                resize: none !important;
+            }
+            input {
+                border-bottom: 1px solid #cbd5e1 !important;
+            }
+            .print-page-break {
+                page-break-before: always;
+            }
+        }
+
+        .pdf-rendering {
+            padding: 12px !important;
+            background: #ffffff !important;
+        }
+    </style>
+
+    <script>
+        let currentCalendarDate = new Date();
+        let congratsShownThisSession = false;
+        let priorityVisits = [];
+        let customTasks = [];
+
+        const exampleVisits = [
+            { id: 1, name: "Maria Silva (Gestante 3º Tri)", address: "Rua A, nº 12 - Q01", reason: "Consulta Puerperal / Pré-Natal", priority: "Alta", day: "Segunda (M)", done: true },
+            { id: 2, name: "Seu João (Hipertenso / Diabético)", address: "Rua B, nº 45 - Q02", reason: "Aferição de PA e HGT / Medicação", priority: "Média", day: "Terça (T)", done: true },
+            { id: 3, name: "Dona Francisca (Acamada)", address: "Av. Principal, nº 102", reason: "Visita de Acompanhamento / Curativo", priority: "Alta", day: "Quarta (M)", done: false },
+            { id: 4, name: "Bebê Lucas (Puerpério / RN)", address: "Rua C, nº 08 - Q03", reason: "Teste do Pezinho e Puerpério", priority: "Alta", day: "Quinta (M)", done: false },
+            { id: 5, name: "Carlos Eduardo (Busca Ativa)", address: "Rua D, nº 88", reason: "Faltoso Vacina Pediátrica", priority: "Normal", day: "Sexta (M)", done: false }
+        ];
+
+        const exampleCustomTasks = [
+            { id: 1, title: "Lançamento de 15 Fichas de Visita no e-SUS PEC", category: "e-SUS", done: true },
+            { id: 2, title: "Reunião de Matriciamento com Equipe de Enfermagem", category: "Reunião", done: true },
+            { id: 3, title: "Organização dos Prontuários e Fichas de Campo (MA 03)", category: "Gestão", done: false },
+            { id: 4, title: "Acompanhamento do Grupo HIPERDIA na CF/CMS", category: "Ação Coletiva", done: false }
+        ];
+
+        /* Calculate ISO Week Number from Date */
+        function getWeekNumber(date) {
+            const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+            const dayNum = d.getUTCDay() || 7;
+            d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+            const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+            return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+        }
+
+        function updateWeekBadge() {
+            const weekStartVal = document.getElementById('weekStart')?.value;
+            const weekEndVal = document.getElementById('weekEnd')?.value;
+            const weekNumberBadge = document.getElementById('weekNumberBadge');
+            const weekPrintBadge = document.getElementById('weekPrintBadge');
+            const selectedWeekDetail = document.getElementById('selectedWeekDetail');
+            let weekNum = '--';
+
+            if (weekStartVal) {
+                const dateObj = new Date(weekStartVal + 'T00:00:00');
+                weekNum = getWeekNumber(dateObj);
+            } else {
+                weekNum = getWeekNumber(new Date());
+            }
+
+            if (weekNumberBadge) weekNumberBadge.innerText = `Semana ${weekNum}`;
+            if (weekPrintBadge) weekPrintBadge.innerText = `SEMANA ${weekNum}`;
+
+            if (selectedWeekDetail) {
+                if (weekStartVal && weekEndVal) {
+                    const sParts = weekStartVal.split('-');
+                    const eParts = weekEndVal.split('-');
+                    const strStart = `${sParts[2]}/${sParts[1]}`;
+                    const strEnd = `${eParts[2]}/${eParts[1]}`;
+                    selectedWeekDetail.innerHTML = `<span class="font-bold text-rio-900">Semana ${weekNum} do Ano:</span> ${strStart} a ${strEnd}`;
+                } else {
+                    selectedWeekDetail.innerText = `Semana ${weekNum} do Ano`;
+                }
+            }
+        }
+
+        /* Set default dates to current week (Monday to Friday) */
+        function setDefaultDates() {
+            try {
+                const today = new Date();
+                const dayOfWeek = today.getDay(); // 0 is Sun, 1 is Mon
+                const distanceToMonday = (dayOfWeek === 0 ? -6 : 1 - dayOfWeek);
+                
+                const monday = new Date(today);
+                monday.setDate(today.getDate() + distanceToMonday);
+
+                const friday = new Date(monday);
+                friday.setDate(monday.getDate() + 4);
+
+                const weekStartInput = document.getElementById('weekStart');
+                const weekEndInput = document.getElementById('weekEnd');
+
+                if (weekStartInput && !weekStartInput.value) {
+                    weekStartInput.value = monday.toISOString().split('T')[0];
+                }
+                if (weekEndInput && !weekEndInput.value) {
+                    weekEndInput.value = friday.toISOString().split('T')[0];
+                }
+
+                updateWeekBadge();
+            } catch (err) {
+                console.error("Erro ao definir datas padrão:", err);
+            }
+        }
+
+        function renderCalendar() {
+            const calendarMonthEl = document.getElementById('calendarMonthTitle');
+            const calendarGridEl = document.getElementById('calendarDaysGrid');
+            if (!calendarMonthEl || !calendarGridEl) return;
+
+            const year = currentCalendarDate.getFullYear();
+            const month = currentCalendarDate.getMonth();
+
+            const monthNames = [
+                "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+            ];
+
+            calendarMonthEl.innerText = `${monthNames[month]} ${year}`;
+
+            const firstDayIndex = new Date(year, month, 1).getDay();
+            const lastDay = new Date(year, month + 1, 0).getDate();
+
+            const today = new Date();
+            const weekStartVal = document.getElementById('weekStart')?.value;
+            const weekEndVal = document.getElementById('weekEnd')?.value;
+
+            let startDateObj = weekStartVal ? new Date(weekStartVal + 'T00:00:00') : null;
+            let endDateObj = weekEndVal ? new Date(weekEndVal + 'T23:59:59') : null;
+
+            calendarGridEl.innerHTML = '';
+
+            for (let i = 0; i < firstDayIndex; i++) {
+                const emptyDiv = document.createElement('div');
+                emptyDiv.className = 'text-center py-1 text-slate-300 text-[11px]';
+                calendarGridEl.appendChild(emptyDiv);
+            }
+
+            for (let day = 1; day <= lastDay; day++) {
+                const dateObj = new Date(year, month, day);
+                const dayBtn = document.createElement('button');
+                dayBtn.type = 'button';
+                
+                const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === day;
+                
+                let inSelectedWeek = false;
+                if (startDateObj && endDateObj) {
+                    inSelectedWeek = dateObj >= startDateObj && dateObj <= endDateObj;
+                }
+
+                let classes = 'text-center py-1 text-[11px] rounded-lg font-medium transition cursor-pointer hover:bg-rio-100 hover:text-rio-900 ';
+
+                if (inSelectedWeek) {
+                    classes += ' bg-rio-800 text-white font-bold shadow-sm ';
+                } else if (isToday) {
+                    classes += ' bg-rio-100 text-rio-900 ring-2 ring-rio-gold font-bold ';
+                } else {
+                    classes += ' text-slate-700 bg-slate-50 hover:bg-slate-100 ';
+                }
+
+                dayBtn.className = classes;
+                dayBtn.innerText = day;
+                dayBtn.onclick = () => selectWeekFromDate(new Date(year, month, day));
+
+                calendarGridEl.appendChild(dayBtn);
+            }
+        }
+
+        function prevMonth() {
+            currentCalendarDate.setMonth(currentCalendarDate.getMonth() - 1);
+            renderCalendar();
+        }
+
+        function nextMonth() {
+            currentCalendarDate.setMonth(currentCalendarDate.getMonth() + 1);
+            renderCalendar();
+        }
+
+        function goToToday() {
+            currentCalendarDate = new Date();
+            selectWeekFromDate(new Date());
+        }
+
+        function selectWeekFromDate(date) {
+            const dayOfWeek = date.getDay();
+            const distanceToMonday = (dayOfWeek === 0 ? -6 : 1 - dayOfWeek);
+
+            const monday = new Date(date);
+            monday.setDate(date.getDate() + distanceToMonday);
+
+            const friday = new Date(monday);
+            friday.setDate(monday.getDate() + 4);
+
+            const weekStartInput = document.getElementById('weekStart');
+            const weekEndInput = document.getElementById('weekEnd');
+
+            if (weekStartInput) weekStartInput.value = monday.toISOString().split('T')[0];
+            if (weekEndInput) weekEndInput.value = friday.toISOString().split('T')[0];
+
+            renderCalendar();
+            updateWeekBadge();
+            autoSave();
+            showToast(`Semana selecionada: ${monday.toLocaleDateString('pt-BR')} a ${friday.toLocaleDateString('pt-BR')}`);
+        }
+
+        function renderVisitsTable() {
+            const tbody = document.getElementById('visitsTableBody');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+
+            if (priorityVisits.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="p-4 text-center text-slate-400 italic bg-slate-50 border border-dashed border-slate-200 rounded-lg">
+                            Nenhuma visita priorizada na lista. Clique em "+ Nova Visita" para adicionar.
+                        </td>
+                    </tr>
+                `;
+                updateStats();
+                return;
+            }
+
+            priorityVisits.forEach((visit, index) => {
+                const tr = document.createElement('tr');
+                tr.className = `border-b border-slate-200 transition ${visit.done ? 'bg-emerald-50/50' : 'hover:bg-slate-50'}`;
+
+                const priorityBadgeClass = visit.priority === 'Alta' 
+                    ? 'bg-rose-100 text-rose-800 border-rose-300 font-bold'
+                    : visit.priority === 'Média'
+                    ? 'bg-amber-100 text-amber-800 border-amber-300'
+                    : 'bg-slate-100 text-slate-700 border-slate-300';
+
+                tr.innerHTML = `
+                    <td class="p-2 text-center">
+                        <input type="checkbox" ${visit.done ? 'checked' : ''} onchange="toggleVisitDone(${index})" class="w-4 h-4 text-emerald-600 accent-emerald-600 rounded focus:ring-emerald-500 cursor-pointer">
+                    </td>
+                    <td class="p-2">
+                        <input type="text" value="${escapeHtml(visit.name)}" onchange="updateVisitField(${index}, 'name', this.value)" class="w-full bg-transparent text-xs font-medium ${visit.done ? 'line-through text-slate-400' : 'text-slate-800'} outline-none" placeholder="Nome do paciente">
+                    </td>
+                    <td class="p-2">
+                        <input type="text" value="${escapeHtml(visit.address)}" onchange="updateVisitField(${index}, 'address', this.value)" class="w-full bg-transparent text-xs text-slate-600 outline-none" placeholder="Endereço / Ponto">
+                    </td>
+                    <td class="p-2">
+                        <input type="text" value="${escapeHtml(visit.reason)}" onchange="updateVisitField(${index}, 'reason', this.value)" class="w-full bg-transparent text-xs text-slate-600 outline-none" placeholder="Motivo / Agravo">
+                    </td>
+                    <td class="p-2">
+                        <select onchange="updateVisitField(${index}, 'priority', this.value)" class="w-full text-[11px] rounded px-1.5 py-0.5 border border-slate-200 outline-none ${priorityBadgeClass}">
+                            <option value="Alta" ${visit.priority === 'Alta' ? 'selected' : ''}>Alta</option>
+                            <option value="Média" ${visit.priority === 'Média' ? 'selected' : ''}>Média</option>
+                            <option value="Normal" ${visit.priority === 'Normal' ? 'selected' : ''}>Normal</option>
+                        </select>
+                    </td>
+                    <td class="p-2">
+                        <input type="text" value="${escapeHtml(visit.day)}" onchange="updateVisitField(${index}, 'day', this.value)" class="w-full bg-transparent text-xs text-slate-600 outline-none" placeholder="Dia / Turno">
+                    </td>
+                    <td class="p-2 text-center no-print">
+                        <button onclick="removePriorityVisit(${index})" class="text-slate-300 hover:text-rose-600 transition" title="Excluir">
+                            <i class="fa-solid fa-trash-can text-xs"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            updateStats();
+        }
+
+        function addPriorityVisit() {
+            priorityVisits.push({
+                id: Date.now(),
+                name: '',
+                address: '',
+                reason: '',
+                priority: 'Normal',
+                day: '',
+                done: false
+            });
+            renderVisitsTable();
+            autoSave();
+        }
+
+        function removePriorityVisit(index) {
+            priorityVisits.splice(index, 1);
+            renderVisitsTable();
+            autoSave();
+        }
+
+        function toggleVisitDone(index) {
+            priorityVisits[index].done = !priorityVisits[index].done;
+            renderVisitsTable();
+            autoSave();
+        }
+
+        function updateVisitField(index, field, value) {
+            priorityVisits[index][field] = value;
+            if (field === 'priority') {
+                renderVisitsTable();
+            }
+            autoSave();
+        }
+
+        function renderCustomChecklist() {
+            const container = document.getElementById('customChecklistContainer');
+            if (!container) return;
+            container.innerHTML = '';
+
+            if (customTasks.length === 0) {
+                container.innerHTML = `
+                    <div class="col-span-full p-4 text-center text-slate-400 italic bg-slate-50 border border-dashed border-slate-200 rounded-lg">
+                        Nenhuma tarefa personalizada cadastrada. Clique em "+ Nova Tarefa" para adicionar reuniões, metas do e-SUS ou ações coletivas.
+                    </div>
+                `;
+                updateStats();
+                return;
+            }
+
+            customTasks.forEach((task, index) => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = `p-2.5 rounded-lg border transition flex items-center gap-2 ${task.done ? 'bg-rio-50/60 border-rio-200' : 'bg-slate-50 border-slate-200 hover:bg-white'}`;
+
+                itemDiv.innerHTML = `
+                    <input type="checkbox" ${task.done ? 'checked' : ''} onchange="toggleCustomTaskDone(${index})" class="w-4 h-4 text-rio-600 accent-rio-600 rounded focus:ring-rio-500 cursor-pointer flex-shrink-0">
+                    <input type="text" value="${escapeHtml(task.title)}" onchange="updateCustomTaskField(${index}, 'title', this.value)" class="flex-grow bg-transparent text-xs font-medium ${task.done ? 'line-through text-slate-400' : 'text-slate-800'} outline-none" placeholder="Descrição da tarefa...">
+                    <input type="text" value="${escapeHtml(task.category)}" onchange="updateCustomTaskField(${index}, 'category', this.value)" class="w-24 text-[10px] bg-white border border-slate-200 rounded px-1.5 py-0.5 text-slate-600 outline-none text-center" placeholder="Categoria">
+                    <button onclick="removeCustomTask(${index})" class="text-slate-300 hover:text-red-500 transition px-1 no-print" title="Excluir">
+                        <i class="fa-solid fa-trash-can text-xs"></i>
+                    </button>
+                `;
+                container.appendChild(itemDiv);
+            });
+
+            updateStats();
+        }
+
+        function addCustomTask() {
+            customTasks.push({
+                id: Date.now(),
+                title: '',
+                category: 'Geral',
+                done: false
+            });
+            renderCustomChecklist();
+            autoSave();
+        }
+
+        function removeCustomTask(index) {
+            customTasks.splice(index, 1);
+            renderCustomChecklist();
+            autoSave();
+        }
+
+        function toggleCustomTaskDone(index) {
+            customTasks[index].done = !customTasks[index].done;
+            renderCustomChecklist();
+            autoSave();
+        }
+
+        function updateCustomTaskField(index, field, value) {
+            customTasks[index][field] = value;
+            autoSave();
+        }
+
+        function updateStats() {
+            const completedVisits = priorityVisits.filter(v => v.done).length;
+            const totalVisits = priorityVisits.length;
+
+            const completedTasks = customTasks.filter(t => t.done).length;
+            const totalTasks = customTasks.length;
+
+            const goalInput = parseInt(document.getElementById('totalVisitsGoal')?.value) || 1;
+
+            const visitStatsEl = document.getElementById('visitStats');
+            const customTaskStatsEl = document.getElementById('customTaskStats');
+            if (visitStatsEl) visitStatsEl.innerText = `${completedVisits} / ${totalVisits} Concluídas`;
+            if (customTaskStatsEl) customTaskStatsEl.innerText = `${completedTasks} / ${totalTasks} Concluídas`;
+
+            const checklistCountEl = document.getElementById('checklistCompletedCount');
+            const customTasksCountEl = document.getElementById('customTasksCompletedCount');
+            if (checklistCountEl) checklistCountEl.innerText = `${completedVisits}`;
+            if (customTasksCountEl) customTasksCountEl.innerText = `${completedTasks}`;
+
+            const percent = Math.min(100, Math.round((completedVisits / goalInput) * 100));
+            const goalDisplayEl = document.getElementById('goalDisplay');
+            const goalBarEl = document.getElementById('goalProgressBar');
+            if (goalDisplayEl) goalDisplayEl.innerText = `${completedVisits} / ${goalInput} (${percent}%)`;
+            if (goalBarEl) goalBarEl.style.width = `${percent}%`;
+
+            const goalBadge = document.getElementById('goalBadge');
+            if (goalBadge) {
+                if (percent >= 100) {
+                    goalBadge.className = "text-[10px] font-black px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-sm";
+                    goalBadge.innerText = "Meta Atingida! 🎉";
+
+                    if (!congratsShownThisSession && (completedVisits > 0 || completedTasks > 0)) {
+                        showCongratsModal();
+                    }
+                } else if (percent >= 50) {
+                    goalBadge.className = "text-[10px] font-bold px-2 py-0.5 rounded bg-rio-100 text-rio-800 border border-rio-300";
+                    goalBadge.innerText = "Em Progresso (Bom)";
+                } else {
+                    goalBadge.className = "text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300";
+                    goalBadge.innerText = "Em Andamento";
+                }
+            }
+        }
+
+        function showCongratsModal() {
+            congratsShownThisSession = true;
+            const modal = document.getElementById('congratsModal');
+            if (modal) modal.classList.remove('hidden');
+        }
+
+        function closeCongratsModal() {
+            const modal = document.getElementById('congratsModal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function getPlannerData() {
+            return {
+                acsName: document.getElementById('acsName')?.value || '',
+                ubsName: document.getElementById('ubsName')?.value || '',
+                microarea: document.getElementById('microarea')?.value || '',
+                weekStart: document.getElementById('weekStart')?.value || '',
+                weekEnd: document.getElementById('weekEnd')?.value || '',
+                
+                acolhimentoSchedule: document.getElementById('acolhimentoSchedule')?.value || '',
+                esusSchedule: document.getElementById('esusSchedule')?.value || '',
+
+                monMorning: document.getElementById('monMorning')?.value || '',
+                monAfternoon: document.getElementById('monAfternoon')?.value || '',
+                monFocus: document.getElementById('monFocus')?.value || '',
+
+                tueMorning: document.getElementById('tueMorning')?.value || '',
+                tueAfternoon: document.getElementById('tueAfternoon')?.value || '',
+                tueFocus: document.getElementById('tueFocus')?.value || '',
+
+                wedMorning: document.getElementById('wedMorning')?.value || '',
+                wedAfternoon: document.getElementById('wedAfternoon')?.value || '',
+                wedFocus: document.getElementById('wedFocus')?.value || '',
+
+                thuMorning: document.getElementById('thuMorning')?.value || '',
+                thuAfternoon: document.getElementById('thuAfternoon')?.value || '',
+                thuFocus: document.getElementById('thuFocus')?.value || '',
+
+                friMorning: document.getElementById('friMorning')?.value || '',
+                friAfternoon: document.getElementById('friAfternoon')?.value || '',
+                friFocus: document.getElementById('friFocus')?.value || '',
+
+                microareaNotes: document.getElementById('microareaNotes')?.value || '',
+                totalVisitsGoal: document.getElementById('totalVisitsGoal')?.value || 25,
+                priorityVisits: priorityVisits,
+                customTasks: customTasks
+            };
+        }
+
+        function loadPlannerFromData(data) {
+            if (!data) return;
+
+            if (document.getElementById('acsName')) document.getElementById('acsName').value = data.acsName || '';
+            if (document.getElementById('ubsName')) document.getElementById('ubsName').value = data.ubsName || '';
+            if (document.getElementById('microarea')) document.getElementById('microarea').value = data.microarea || '';
+            if (data.weekStart && document.getElementById('weekStart')) document.getElementById('weekStart').value = data.weekStart;
+            if (data.weekEnd && document.getElementById('weekEnd')) document.getElementById('weekEnd').value = data.weekEnd;
+
+            if (document.getElementById('acolhimentoSchedule')) document.getElementById('acolhimentoSchedule').value = data.acolhimentoSchedule || '';
+            if (document.getElementById('esusSchedule')) document.getElementById('esusSchedule').value = data.esusSchedule || '';
+
+            if (document.getElementById('monMorning')) document.getElementById('monMorning').value = data.monMorning || '';
+            if (document.getElementById('monAfternoon')) document.getElementById('monAfternoon').value = data.monAfternoon || '';
+            if (document.getElementById('monFocus')) document.getElementById('monFocus').value = data.monFocus || '';
+
+            if (document.getElementById('tueMorning')) document.getElementById('tueMorning').value = data.tueMorning || '';
+            if (document.getElementById('tueAfternoon')) document.getElementById('tueAfternoon').value = data.tueAfternoon || '';
+            if (document.getElementById('tueFocus')) document.getElementById('tueFocus').value = data.tueFocus || '';
+
+            if (document.getElementById('wedMorning')) document.getElementById('wedMorning').value = data.wedMorning || '';
+            if (document.getElementById('wedAfternoon')) document.getElementById('wedAfternoon').value = data.wedAfternoon || '';
+            if (document.getElementById('wedFocus')) document.getElementById('wedFocus').value = data.wedFocus || '';
+
+            if (document.getElementById('thuMorning')) document.getElementById('thuMorning').value = data.thuMorning || '';
+            if (document.getElementById('thuAfternoon')) document.getElementById('thuAfternoon').value = data.thuAfternoon || '';
+            if (document.getElementById('thuFocus')) document.getElementById('thuFocus').value = data.thuFocus || '';
+
+            if (document.getElementById('friMorning')) document.getElementById('friMorning').value = data.friMorning || '';
+            if (document.getElementById('friAfternoon')) document.getElementById('friAfternoon').value = data.friAfternoon || '';
+            if (document.getElementById('friFocus')) document.getElementById('friFocus').value = data.friFocus || '';
+
+            if (document.getElementById('microareaNotes')) document.getElementById('microareaNotes').value = data.microareaNotes || '';
+            if (data.totalVisitsGoal && document.getElementById('totalVisitsGoal')) document.getElementById('totalVisitsGoal').value = data.totalVisitsGoal;
+
+            priorityVisits = data.priorityVisits || [];
+            customTasks = data.customTasks || [];
+            renderVisitsTable();
+            renderCustomChecklist();
+            renderCalendar();
+            updateWeekBadge();
+        }
+
+        function loadExampleData() {
+            const exampleData = {
+                acsName: "Ana Clara Souza",
+                ubsName: "CF Rodolpho Perissé",
+                microarea: "eSF Carioca - Microárea 03",
+                weekStart: document.getElementById('weekStart')?.value || '',
+                weekEnd: document.getElementById('weekEnd')?.value || '',
+
+                acolhimentoSchedule: "Terça e Quinta-feira: 07:00 às 09:00 no Acolhimento Central da CF.",
+                esusSchedule: "Segunda e Quarta-feira: 13:30 às 15:30 na Sala de Informática.",
+
+                monMorning: "🏡 Visita Domiciliar - Rua A (Foco em Gestantes e Puérperas)",
+                monAfternoon: "💻 Digitação no e-SUS PEC / Atualização de Fichas de Cadastro",
+                monFocus: "Gestantes do 3º Trimestre",
+
+                tueMorning: "🏥 Acolhimento na CF/CMS (07h às 09h)\n🏡 Visita Domiciliar - Rua B",
+                tueAfternoon: "🔍 Busca Ativa de faltosos de vacina infantil (SMS Rio)",
+                tueFocus: "Vacinação Pediátrica",
+
+                wedMorning: "🏡 Visita Domiciliar - Av. Brasil (Pacientes Acamados / Curativos)",
+                wedAfternoon: "💻 Digitação no e-SUS PEC / Lançamento de VD no Sistema",
+                wedFocus: "Hipertensos e Diabéticos",
+
+                thuMorning: "🏥 Acolhimento na CF/CMS (07h às 09h)\n👥 Reunião de Equipe com a Enfermeira (10h)",
+                thuAfternoon: "💉 Grupo HIPERDIA na CF (Palestra e Aferição de PA)",
+                thuFocus: "Ação Coletiva na Unidade",
+
+                friMorning: "🏡 Visita Domiciliar de Retorno / Puerpério e RN",
+                friAfternoon: "📄 Organização de Fichas de Campo / Fechamento Semanal",
+                friFocus: "Consolidação dos Dados e-SUS",
+
+                microareaNotes: "• Entregar a guia de encaminhamento SISREG da Dona Tereza.\n• Pedir reforço de vacinas para a enfermagem da CF.\n• Confirmar consulta de acompanhamento do bebê Lucas.",
+                totalVisitsGoal: 25,
+
+                priorityVisits: JSON.parse(JSON.stringify(exampleVisits)),
+                customTasks: JSON.parse(JSON.stringify(exampleCustomTasks))
+            };
+
+            loadPlannerFromData(exampleData);
+            savePlannerToStorage(false);
+            showToast("Modelo de exemplo da SMS Rio carregado!");
+        }
+
+        function openClearModal() {
+            const modal = document.getElementById('clearConfirmModal');
+            if (modal) modal.classList.remove('hidden');
+        }
+
+        function closeClearModal() {
+            const modal = document.getElementById('clearConfirmModal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function confirmClearPlanner() {
+            closeClearModal();
+            const emptyData = {
+                acsName: document.getElementById('acsName')?.value || '',
+                ubsName: document.getElementById('ubsName')?.value || '',
+                microarea: document.getElementById('microarea')?.value || '',
+                weekStart: document.getElementById('weekStart')?.value || '',
+                weekEnd: document.getElementById('weekEnd')?.value || '',
+                acolhimentoSchedule: '',
+                esusSchedule: '',
+                monMorning: '', monAfternoon: '', monFocus: '',
+                tueMorning: '', tueAfternoon: '', tueFocus: '',
+                wedMorning: '', wedAfternoon: '', wedFocus: '',
+                thuMorning: '', thuAfternoon: '', thuFocus: '',
+                friMorning: '', friAfternoon: '', friFocus: '',
+                microareaNotes: '',
+                totalVisitsGoal: 25,
+                priorityVisits: [],
+                customTasks: []
+            };
+            loadPlannerFromData(emptyData);
+            savePlannerToStorage(false);
+            showToast("Campos limpos com sucesso.");
+        }
+
+        function autoSave() {
+            savePlannerToStorage(false);
+        }
+
+        function savePlannerToStorage(showNotification = true) {
+            const data = getPlannerData();
+            localStorage.setItem('organizaAcs_rio_data', JSON.stringify(data));
+            if (showNotification) {
+                showToast("Planejamento salvo no navegador!");
+            }
+        }
+
+        function getBlankPlannerData() {
+            return {
+                acsName: document.getElementById('acsName')?.value || '',
+                ubsName: document.getElementById('ubsName')?.value || '',
+                microarea: document.getElementById('microarea')?.value || '',
+                weekStart: document.getElementById('weekStart')?.value || '',
+                weekEnd: document.getElementById('weekEnd')?.value || '',
+                acolhimentoSchedule: '',
+                esusSchedule: '',
+                monMorning: '', monAfternoon: '', monFocus: '',
+                tueMorning: '', tueAfternoon: '', tueFocus: '',
+                wedMorning: '', wedAfternoon: '', wedFocus: '',
+                thuMorning: '', thuAfternoon: '', thuFocus: '',
+                friMorning: '', friAfternoon: '', friFocus: '',
+                microareaNotes: '',
+                totalVisitsGoal: 25,
+                priorityVisits: Array(6).fill(null).map(() => ({ name: '', address: '', reason: '', priority: 'Normal', day: '', done: false })),
+                customTasks: Array(5).fill(null).map(() => ({ title: '', category: 'Geral', done: false }))
+            };
+        }
+
+        function exportToPDF(mode = 'filled') {
+            showToast("Gerando PDF da SMS Rio, aguarde...");
+            const originalData = getPlannerData();
+
+            if (mode === 'blank') {
+                loadPlannerFromData(getBlankPlannerData());
+            }
+
+            const element = document.querySelector('.planner-container');
+            element.classList.add('pdf-rendering');
+
+            const acsNameInput = document.getElementById('acsName')?.value || 'ACS';
+            const cleanAcsName = acsNameInput.trim().replace(/[^a-zA-Z0-9à-úÀ-Ú_\s-]/g, '').replace(/\s+/g, '_') || 'ACS';
+            
+            const weekStartVal = document.getElementById('weekStart')?.value;
+            let weekNum = 1;
+            if (weekStartVal) {
+                weekNum = getWeekNumber(new Date(weekStartVal + 'T00:00:00'));
+            } else {
+                weekNum = getWeekNumber(new Date());
+            }
+
+            const fileName = `SEMANA-${weekNum}-${cleanAcsName}${mode === 'blank' ? '-MatrizPapel' : ''}.pdf`;
+
+            const opt = {
+                margin:       [8, 8, 8, 8],
+                filename:     fileName,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2, useCORS: true, logging: false },
+                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            };
+
+            html2pdf().set(opt).from(element).save().then(() => {
+                element.classList.remove('pdf-rendering');
+                if (mode === 'blank') {
+                    loadPlannerFromData(originalData);
+                }
+                showToast(`PDF salvo: ${fileName}`);
+            }).catch(err => {
+                console.error("Erro ao gerar PDF:", err);
+                element.classList.remove('pdf-rendering');
+                if (mode === 'blank') {
+                    loadPlannerFromData(originalData);
+                }
+                triggerPrint(mode);
+            });
+        }
+
+        function triggerPrint(mode) {
+            const originalData = getPlannerData();
+
+            if (mode === 'blank') {
+                loadPlannerFromData(getBlankPlannerData());
+
+                setTimeout(() => {
+                    try {
+                        window.print();
+                    } catch (e) {
+                        showToast("Impressão bloqueada. Gerando PDF...");
+                        exportToPDF('blank');
+                    }
+                    setTimeout(() => {
+                        loadPlannerFromData(originalData);
+                    }, 500);
+                }, 300);
+            } else {
+                try {
+                    window.print();
+                } catch (e) {
+                    showToast("Impressão bloqueada. Gerando PDF...");
+                    exportToPDF('filled');
+                }
+            }
+        }
+
+        function copyTag(text) {
+            const tempInput = document.createElement('input');
+            tempInput.value = text;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            try {
+                document.execCommand('copy');
+                showToast(`Copiado: "${text}"`);
+            } catch (err) {
+                showToast(`Atalho: ${text}`);
+            }
+            document.body.removeChild(tempInput);
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toastMessage');
+            if (!toast || !toastMsg) return;
+
+            toastMsg.innerText = msg;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        /* Safe application initialization */
+        function initApp() {
+            setDefaultDates();
+            renderCalendar();
+            updateWeekBadge();
+            
+            try {
+                const savedData = localStorage.getItem('organizaAcs_rio_data');
+                if (savedData) {
+                    loadPlannerFromData(JSON.parse(savedData));
+                } else {
+                    loadExampleData();
+                }
+            } catch(e) {
+                console.error("Erro ao carregar dados salvos:", e);
+                loadExampleData();
+            }
+
+            const inputs = document.querySelectorAll('input, textarea, select');
+            inputs.forEach(input => {
+                input.addEventListener('change', autoSave);
+            });
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initApp);
+        } else {
+            initApp();
+        }
+        window.onload = initApp;
+    </script>
+</head>
+
+<body class="bg-slate-100 min-h-screen text-slate-800 p-2 sm:p-4">
+
+    <header class="max-w-6xl mx-auto mb-4 no-print">
+        <div class="bg-rio-900 text-white p-4 rounded-xl shadow-md flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-rio-gold text-rio-900 flex items-center justify-center font-black text-xl shadow">
+                    <i class="fa-solid fa-notes-medical"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg leading-tight">OrganizaACS - Planejador Semanal</h1>
+                    <p class="text-xs text-rio-200">Atenção Primária à Saúde • Secretaria Municipal de Saúde do Rio de Janeiro</p>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex flex-wrap items-center gap-2">
+                <button onclick="loadExampleData()" type="button" class="px-3 py-1.5 bg-rio-800 hover:bg-rio-700 text-white rounded-lg text-xs font-semibold border border-rio-700 transition flex items-center gap-1.5 shadow-sm">
+                    <i class="fa-solid fa-wand-magic-sparkles text-rio-gold"></i> Modelo Exemplo SMS
+                </button>
+                <button onclick="openClearModal()" type="button" class="px-3 py-1.5 bg-rio-800 hover:bg-rio-700 text-white rounded-lg text-xs font-semibold border border-rio-700 transition flex items-center gap-1.5 shadow-sm">
+                    <i class="fa-solid fa-rotate-left"></i> Limpar
+                </button>
+                <button onclick="exportToPDF('blank')" type="button" class="px-3 py-1.5 bg-white text-rio-900 hover:bg-rio-50 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm">
+                    <i class="fa-solid fa-print text-rio-700"></i> Matriz Papel (Caneta)
+                </button>
+                <button onclick="exportToPDF('filled')" type="button" class="px-3.5 py-1.5 bg-rio-gold hover:bg-amber-400 text-rio-900 font-extrabold rounded-lg text-xs transition flex items-center gap-1.5 shadow">
+                    <i class="fa-solid fa-file-pdf"></i> Baixar / Imprimir PDF
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto planner-container bg-white rounded-2xl shadow-xl border border-slate-200 p-4 sm:p-6 mb-8">
+        
+        <!-- Document Print Header (SMS Rio Identity) -->
+        <div class="border-b-2 border-rio-900 pb-4 mb-4 flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 bg-rio-900 text-white rounded-lg flex items-center justify-center font-bold text-2xl">
+                    <i class="fa-solid fa-hospital-user text-rio-gold"></i>
+                </div>
+                <div>
+                    <h2 class="text-xl font-extrabold text-rio-900 tracking-tight uppercase">PLANEJADOR SEMANAL DO ACS</h2>
+                    <p class="text-xs font-semibold text-slate-600">SECRETARIA MUNICIPAL DE SAÚDE DO RIO DE JANEIRO • SMS RIO</p>
+                </div>
+            </div>
+            
+            <div class="text-right">
+                <span id="weekPrintBadge" class="inline-block bg-rio-900 text-rio-gold text-xs font-black px-3 py-1 rounded-full uppercase tracking-wider">
+                    SEMANA --
+                </span>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6 items-start">
+            
+            <!-- ACS Info Fields (Left Column) -->
+            <div class="lg:col-span-2 bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div class="md:col-span-2">
+                    <label class="block text-[11px] font-bold text-rio-900 uppercase tracking-wider mb-1">Nome do Agente Comunitário de Saúde (ACS)</label>
+                    <input type="text" id="acsName" placeholder="Ex: Ana Clara Souza" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-rio-600">
+                </div>
+
+                <div>
+                    <label class="block text-[11px] font-bold text-rio-900 uppercase tracking-wider mb-1">Clínica da Família / CMS</label>
+                    <input type="text" id="ubsName" placeholder="Ex: CF Rodolpho Perissé" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-rio-600">
+                </div>
+
+                <div>
+                    <label class="block text-[11px] font-bold text-rio-900 uppercase tracking-wider mb-1">Equipe & Microárea (MA)</label>
+                    <input type="text" id="microarea" placeholder="Ex: eSF Carioca - MA 03" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-rio-600">
+                </div>
+
+                <div>
+                    <label class="block text-[11px] font-bold text-rio-900 uppercase tracking-wider mb-1">Início da Semana (Segunda)</label>
+                    <input type="date" id="weekStart" onchange="renderCalendar(); updateWeekBadge(); autoSave();" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-rio-600">
+                </div>
+
+                <div>
+                    <label class="block text-[11px] font-bold text-rio-900 uppercase tracking-wider mb-1">Fim da Semana (Sexta)</label>
+                    <input type="date" id="weekEnd" onchange="renderCalendar(); updateWeekBadge(); autoSave();" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-rio-600">
+                </div>
+            </div>
+
+            <!-- Monthly Interactive Calendar Card (Right Column) -->
+            <div class="bg-white p-3.5 rounded-xl border border-rio-200 shadow-sm relative">
+                <div class="bg-rio-900 text-white p-2 rounded-lg mb-2 text-center">
+                    <span id="selectedWeekDetail" class="text-[11px] font-extrabold text-rio-gold block">
+                        Semana Selecionada
+                    </span>
+                </div>
+
+                <div class="flex items-center justify-between mb-2">
+                    <button onclick="prevMonth()" type="button" class="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold no-print" title="Mês Anterior">&lt;</button>
+                    <h3 id="calendarMonthTitle" class="text-xs font-extrabold text-rio-900 uppercase">Mês Atual</h3>
+                    <div class="flex items-center gap-1 no-print">
+                        <button onclick="goToToday()" type="button" class="px-1.5 py-0.5 bg-rio-50 text-rio-900 text-[10px] font-bold rounded hover:bg-rio-100 border border-rio-200">Hoje</button>
+                        <button onclick="nextMonth()" type="button" class="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold" title="Próximo Mês">&gt;</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-7 text-center text-[10px] font-bold text-slate-400 mb-1 border-b pb-1">
+                    <div>D</div><div>S</div><div>T</div><div>Q</div><div>Q</div><div>S</div><div>S</div>
+                </div>
+
+                <div id="calendarDaysGrid" class="grid grid-cols-7 gap-1">
+                    <!-- Dynamic Days -->
+                </div>
+                <p class="text-[9.5px] text-slate-400 text-center mt-2 italic no-print">Clique em um dia para selecionar a semana correspondente</p>
+            </div>
+
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div class="bg-rio-50/70 p-3.5 rounded-xl border border-rio-200">
+                <div class="flex items-center gap-2 mb-1.5 text-rio-900 font-bold text-xs">
+                    <i class="fa-solid fa-user-nurse text-rio-700"></i>
+                    <span>ESCALA DE ACOLHIMENTO / TRIAGEM NA CF/CMS</span>
+                </div>
+                <input type="text" id="acolhimentoSchedule" placeholder="Ex: Terça e Quinta-feira: 07:00 às 09:00 no Acolhimento" class="w-full bg-white border border-rio-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-rio-600">
+            </div>
+
+            <div class="bg-rio-50/70 p-3.5 rounded-xl border border-rio-200">
+                <div class="flex items-center gap-2 mb-1.5 text-rio-900 font-bold text-xs">
+                    <i class="fa-solid fa-laptop-medical text-rio-700"></i>
+                    <span>HORÁRIOS RESERVADOS PARA e-SUS PEC (SISTEMA)</span>
+                </div>
+                <input type="text" id="esusSchedule" placeholder="Ex: Segunda e Quarta-feira: 13:30 às 15:30 no Computador" class="w-full bg-white border border-rio-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-rio-600">
+            </div>
+        </div>
+
+        <!-- Section 3: Quick Insertion Helpers -->
+        <div class="mb-4 bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex flex-wrap items-center gap-2 text-xs no-print">
+            <span class="font-bold text-slate-600 text-[11px]"><i class="fa-solid fa-bolt text-amber-500"></i> Atalhos Rápidos:</span>
+            <button onclick="copyTag('🏡 Visita Domiciliar')" type="button" class="px-2 py-0.5 bg-white border border-slate-200 rounded text-slate-700 hover:bg-slate-100 transition text-[11px]">🏡 Visita Domiciliar</button>
+            <button onclick="copyTag('🏥 Acolhimento')" type="button" class="px-2 py-0.5 bg-white border border-slate-200 rounded text-slate-700 hover:bg-slate-100 transition text-[11px]">🏥 Acolhimento</button>
+            <button onclick="copyTag('💻 Digitação e-SUS')" type="button" class="px-2 py-0.5 bg-white border border-slate-200 rounded text-slate-700 hover:bg-slate-100 transition text-[11px]">💻 Digitação e-SUS</button>
+            <button onclick="copyTag('👥 Reunião de Equipe')" type="button" class="px-2 py-0.5 bg-white border border-slate-200 rounded text-slate-700 hover:bg-slate-100 transition text-[11px]">👥 Reunião</button>
+            <button onclick="copyTag('🔍 Busca Ativa Vacina')" type="button" class="px-2 py-0.5 bg-white border border-slate-200 rounded text-slate-700 hover:bg-slate-100 transition text-[11px]">🔍 Busca Ativa Vacina</button>
+        </div>
+
+        <div class="mb-6">
+            <h3 class="text-xs font-black text-rio-900 uppercase tracking-wider mb-2 flex items-center gap-2">
+                <i class="fa-solid fa-calendar-week text-rio-700"></i> AGENDA DA SEMANA (MANHÃ E TARDE)
+            </h3>
+
+            <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
+                
+                <!-- Seg -->
+                <div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div class="bg-rio-900 text-white p-2 text-center">
+                        <span class="font-extrabold text-xs block">SEGUNDA-FEIRA</span>
+                    </div>
+                    <div class="p-2 space-y-2">
+                        <div>
+                            <span class="text-[10px] font-bold text-rio-700 uppercase block mb-0.5">Foco / Meta do Dia</span>
+                            <input type="text" id="monFocus" placeholder="Ex: Gestantes" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[11px] outline-none">
+                        </div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Manhã</span>
+                            <textarea id="monMorning" rows="3" class="w-full bg-slate-50 border border-slate-200 rounded p-2 text-xs outline-none focus:bg-white resize-y" placeholder="Atividades da manhã..."></textarea>
+                        </div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Tarde</span>
+                            <textarea id="monAfternoon" rows="3" class="w-full bg-slate-50 border border-slate-200 rounded p-2 text-xs outline-none focus:bg-white resize-y" placeholder="Atividades da tarde..."></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Ter -->
+                <div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div class="bg-rio-900 text-white p-2 text-center">
+                        <span class="font-extrabold text-xs block">TERÇA-FEIRA</span>
+                    </div>
+                    <div class="p-2 space-y-2">
+                        <div>
+                            <span class="text-[10px] font-bold text-rio-700 uppercase block mb-0.5">Foco / Meta do Dia</span>
+                            <input type="text" id="tueFocus" placeholder="Ex: Busca Ativa" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[11px] outline-none">
+                        </div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Manhã</span>
+                            <textarea id="tueMorning" rows="3" class="w-full bg-slate-50 border border-slate-200 rounded p-2 text-xs outline-none focus:bg-white resize-y" placeholder="Atividades da manhã..."></textarea>
+                        </div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Tarde</span>
+                            <textarea id="tueAfternoon" rows="3" class="w-full bg-slate-50 border border-slate-200 rounded p-2 text-xs outline-none focus:bg-white resize-y" placeholder="Atividades da tarde..."></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Qua -->
+                <div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div class="bg-rio-900 text-white p-2 text-center">
+                        <span class="font-extrabold text-xs block">QUARTA-FEIRA</span>
+                    </div>
+                    <div class="p-2 space-y-2">
+                        <div>
+                            <span class="text-[10px] font-bold text-rio-700 uppercase block mb-0.5">Foco / Meta do Dia</span>
+                            <input type="text" id="wedFocus" placeholder="Ex: Acamados" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[11px] outline-none">
+                        </div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Manhã</span>
+                            <textarea id="wedMorning" rows="3" class="w-full bg-slate-50 border border-slate-200 rounded p-2 text-xs outline-none focus:bg-white resize-y" placeholder="Atividades da manhã..."></textarea>
+                        </div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Tarde</span>
+                            <textarea id="wedAfternoon" rows="3" class="w-full bg-slate-50 border border-slate-200 rounded p-2 text-xs outline-none focus:bg-white resize-y" placeholder="Atividades da tarde..."></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Qui -->
+                <div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div class="bg-rio-900 text-white p-2 text-center">
+                        <span class="font-extrabold text-xs block">QUINTA-FEIRA</span>
+                    </div>
+                    <div class="p-2 space-y-2">
+                        <div>
+                            <span class="text-[10px] font-bold text-rio-700 uppercase block mb-0.5">Foco / Meta do Dia</span>
+                            <input type="text" id="thuFocus" placeholder="Ex: Grupo Hiperdia" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[11px] outline-none">
+                        </div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Manhã</span>
+                            <textarea id="thuMorning" rows="3" class="w-full bg-slate-50 border border-slate-200 rounded p-2 text-xs outline-none focus:bg-white resize-y" placeholder="Atividades da manhã..."></textarea>
+                        </div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Tarde</span>
+                            <textarea id="thuAfternoon" rows="3" class="w-full bg-slate-50 border border-slate-200 rounded p-2 text-xs outline-none focus:bg-white resize-y" placeholder="Atividades da tarde..."></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sex -->
+                <div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div class="bg-rio-900 text-white p-2 text-center">
+                        <span class="font-extrabold text-xs block">SEXTA-FEIRA</span>
+                    </div>
+                    <div class="p-2 space-y-2">
+                        <div>
+                            <span class="text-[10px] font-bold text-rio-700 uppercase block mb-0.5">Foco / Meta do Dia</span>
+                            <input type="text" id="friFocus" placeholder="Ex: Fechamento" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[11px] outline-none">
+                        </div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Manhã</span>
+                            <textarea id="friMorning" rows="3" class="w-full bg-slate-50 border border-slate-200 rounded p-2 text-xs outline-none focus:bg-white resize-y" placeholder="Atividades da manhã..."></textarea>
+                        </div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Tarde</span>
+                            <textarea id="friAfternoon" rows="3" class="w-full bg-slate-50 border border-slate-200 rounded p-2 text-xs outline-none focus:bg-white resize-y" placeholder="Atividades da tarde..."></textarea>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-chart-line text-rio-700 text-base"></i>
+                    <h3 class="text-xs font-black text-rio-900 uppercase">Acompanhamento de Metas de Produção Semanal</h3>
+                </div>
+                <span id="goalBadge" class="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                    Em Andamento
+                </span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+                
+                <!-- Target Input -->
+                <div class="bg-white p-3 rounded-lg border border-slate-200">
+                    <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Meta de Visitas Domiciliares (VD)</label>
+                    <div class="flex items-center gap-2">
+                        <input type="number" id="totalVisitsGoal" value="25" min="1" onchange="updateStats(); autoSave();" class="w-20 bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs font-extrabold text-rio-900 outline-none text-center">
+                        <span class="text-xs text-slate-500">Visitas Domiciliares/semana</span>
+                    </div>
+                </div>
+
+                <!-- Progress Bar -->
+                <div class="bg-white p-3 rounded-lg border border-slate-200 md:col-span-2">
+                    <div class="flex items-center justify-between text-xs font-bold mb-1.5">
+                        <span class="text-slate-700">Progresso das Visitas Domiciliares Concluídas:</span>
+                        <span id="goalDisplay" class="text-rio-700 font-extrabold">0 / 25 (0%)</span>
+                    </div>
+                    <div class="w-full bg-slate-100 h-3 rounded-full overflow-hidden border border-slate-200">
+                        <div id="goalProgressBar" class="bg-rio-600 h-full w-0 transition-all duration-500"></div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="mb-6">
+            <div class="flex items-center justify-between mb-2">
+                <h3 class="text-xs font-black text-rio-900 uppercase tracking-wider flex items-center gap-2">
+                    <i class="fa-solid fa-list-check text-rio-700"></i> LISTA DE VISITAS DOMICILIARES PRIORITÁRIAS
+                </h3>
+                <button onclick="addPriorityVisit()" type="button" class="px-3 py-1 bg-rio-900 hover:bg-rio-800 text-white font-bold rounded-lg text-xs transition flex items-center gap-1 shadow-sm no-print">
+                    <i class="fa-solid fa-plus text-rio-gold"></i> Nova Visita
+                </button>
+            </div>
+
+            <div class="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
+                <table class="w-full text-left border-collapse bg-white">
+                    <thead>
+                        <tr class="bg-rio-900 text-white text-[11px] uppercase tracking-wider">
+                            <th class="p-2 text-center w-10">Status</th>
+                            <th class="p-2">Paciente / Família</th>
+                            <th class="p-2">Endereço / Ponto</th>
+                            <th class="p-2">Motivo / Agravo</th>
+                            <th class="p-2 w-28">Prioridade</th>
+                            <th class="p-2 w-28">Dia / Turno</th>
+                            <th class="p-2 text-center w-10 no-print">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="visitsTableBody">
+                        <!-- Dynamic visits table rows -->
+                    </tbody>
+                </table>
+            </div>
+            <div class="mt-1 flex items-center justify-between text-[11px] text-slate-500 font-medium">
+                <span>Total de VD concluídas marcarão o progresso acima.</span>
+                <span id="visitStats" class="font-bold text-rio-900">0 / 0 Concluídas</span>
+            </div>
+        </div>
+
+        <div class="mb-6">
+            <div class="flex items-center justify-between mb-2">
+                <h3 class="text-xs font-black text-rio-900 uppercase tracking-wider flex items-center gap-2">
+                    <i class="fa-solid fa-tasks text-rio-700"></i> OUTROS CHECKLISTS & TAREFAS DA SEMANA (E-SUS, REUNIÕES, GRUPOS)
+                </h3>
+                <button onclick="addCustomTask()" type="button" class="px-3 py-1 bg-rio-900 hover:bg-rio-800 text-white font-bold rounded-lg text-xs transition flex items-center gap-1 shadow-sm no-print">
+                    <i class="fa-solid fa-plus text-rio-gold"></i> Nova Tarefa
+                </button>
+            </div>
+
+            <div id="customChecklistContainer" class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <!-- Dynamic task checklist -->
+            </div>
+            <div class="mt-1 flex items-center justify-between text-[11px] text-slate-500 font-medium">
+                <span>Atividades administrativas, digitação no e-SUS e grupos da CF/CMS.</span>
+                <span id="customTaskStats" class="font-bold text-rio-900">0 / 0 Concluídas</span>
+            </div>
+        </div>
+
+        <!-- Section 8: Microarea Lembretes & Field Notes -->
+        <div class="mb-2">
+            <h3 class="text-xs font-black text-rio-900 uppercase tracking-wider mb-2 flex items-center gap-2">
+                <i class="fa-solid fa-clipboard-list text-rio-700"></i> OBSERVAÇÕES DA MICROÁREA & PENDÊNCIAS
+            </h3>
+            <textarea id="microareaNotes" rows="3" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs outline-none focus:bg-white focus:ring-2 focus:ring-rio-600 resize-y" placeholder="Anote aqui pendências de encaminhamento SISREG, pedidos de vacinas para a enfermagem, busca ativa de exames..."></textarea>
+        </div>
+
+    </main>
+
+    <!-- Clear Confirmation Modal (Replaces native confirm dialog) -->
+    <div id="clearConfirmModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-5 text-center border border-slate-200">
+            <div class="w-12 h-12 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-3 text-2xl">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+            <h3 class="text-base font-bold text-slate-800 mb-1">Limpar Planejamento?</h3>
+            <p class="text-xs text-slate-600 mb-4">Tem certeza de que deseja apagar os dados preenchidos da semana atual?</p>
+            <div class="flex items-center gap-2 justify-center">
+                <button onclick="closeClearModal()" type="button" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs transition">
+                    Cancelar
+                </button>
+                <button onclick="confirmClearPlanner()" type="button" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-xs transition shadow">
+                    Sim, Limpar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Congratulatory Celebration Modal -->
+    <div id="congratsModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 text-center border-2 border-rio-gold transform transition-all scale-100">
+            <div class="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-3 text-3xl shadow-inner">
+                <i class="fa-solid fa-trophy"></i>
+            </div>
+            <h3 class="text-lg font-black text-rio-900 mb-1">PARABÉNS PELO EXCELENTE TRABALHO! 🎉</h3>
+            <p class="text-xs text-slate-600 mb-4 leading-relaxed">
+                Você atingiu <span class="font-bold text-emerald-700">100% da sua meta semanal</span> de Visitas Domiciliares e atendimento da comunidade. A Atenção Primária da SMS Rio se fortalece com o seu empenho!
+            </p>
+            <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 mb-4 text-xs text-slate-700 font-medium">
+                <p>• Visitas Domiciliares Concluídas: <strong id="checklistCompletedCount" class="text-emerald-700 font-extrabold">0</strong></p>
+                <p>• Outras Tarefas da Semana: <strong id="customTasksCompletedCount" class="text-rio-700 font-extrabold">0</strong></p>
+            </div>
+            <button onclick="closeCongratsModal()" type="button" class="w-full py-2.5 bg-rio-900 hover:bg-rio-800 text-white font-extrabold rounded-xl text-xs transition shadow-md">
+                Continuar Planejamento
+            </button>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed bottom-4 right-4 bg-rio-900 text-white px-4 py-2.5 rounded-xl shadow-2xl border border-rio-700 flex items-center gap-2.5 text-xs font-semibold transform translate-y-20 opacity-0 transition-all duration-300 z-50">
+        <i class="fa-solid fa-circle-check text-rio-gold text-base"></i>
+        <span id="toastMessage">Planejamento salvo com sucesso!</span>
+    </div>
+
+</body>
+</html>
